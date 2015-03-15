@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Test parser</title>
+</head>
+<body>
+
+	<ul id="entities"></ul>
+
+<script src="http://code.jquery.com/jquery-2.1.3.min.js"></script>
+<script>
+
+	/**
+	 * Parses a "database" save data from AMCDesignor 5
+	 * @param {String} data Save data
+	 * @returns {Object} Object containing all tables and their data
+	 */
+	function parseData(data) {
+		var out = {};
+
+		lines = data.split('\r\r\n');
+
+		var table_name = '';
+		var table_columns = [];
+		var is_parsing_data = false;
+		var table_current_column = 0;
+		var line_data = {};
+		
+		lines.map(function(line) {
+			if(line.indexOf('/BEGIN_TABLE') !== -1) {
+				table_name = /^\/BEGIN_TABLE\s+(\w+)$/.exec(line)[1];
+				table_columns = [];
+				is_parsing_data = false;
+
+				out[table_name] = []; // New empty array for this table
+				return;
+			}
+
+			if(line.indexOf('/BEGIN_DATA') !== -1) {
+				is_parsing_data = true;
+				line_data = {};
+				table_current_column = 0;
+				return;
+			}
+
+			if(line.indexOf('/END_TABLE') !== -1) {
+				is_parsing_data = false; // Prevent parsing blank lines between tables
+				return;
+			}
+
+			if(!is_parsing_data) {
+				// Parsing table header
+				var specs = /^([@\w]+)\s+(\w+)$/.exec(line);
+				if(specs === null) {
+					console.log('Line unreadable: ' + line);
+					return;
+				}
+				table_columns.push({
+					name: specs[1],
+					type: specs[2]
+				});
+			} else {
+				// Parsing column content
+				var current_column_specs = table_columns[table_current_column];
+				var column_data = null; // Value of column for current line
+
+				// Parsing value according to column type
+				switch(current_column_specs.type) {
+					case 'N5':
+					case 'N8':
+					case 'N12':
+						column_data = parseInt(line);
+						break;
+					case 'TXT': // Text area TODO: How to read if multiline ?
+					case 'A80': // Text string
+					case 'A8':
+					default:
+						column_data = line;
+						break;
+				}
+				line_data[current_column_specs.name] = column_data;
+
+				// If it was the last column for the line
+				if(++table_current_column >= table_columns.length) {
+					// Saving data to output
+					out[table_name].push(line_data);
+					line_data = {};
+					table_current_column = 0;
+				}
+			}
+		});
+
+		return out;
+	}
+
+	/**
+	 * Testing
+	 */
+	$(document).ready(function() {
+		$.ajax('sample.mcd', {}).done(function(data) {
+			var mcd = parseData(data);
+
+			// Displays all the data tables
+			console.log(mcd);
+
+			mcd.AMCENTT.map(function(entity) {
+				var $entity = $('<li><div>' + entity.NAME + '</div></li>');
+				$('#entities').append($entity);
+				$infos = $('<ul></ul>');
+				$entity.append($infos);
+
+				mcd.AMCPENT.map(function(assoc) {
+					// Found an associative record for entity <-> info
+					if(assoc.ENTT == entity.ENTT) {
+						// Use it to find corresponding info record
+						mcd.AMCINFO.some(function(info) {
+							if(info.INFO == assoc.INFO) {
+								$infos.append('<li>' + info.NAME + '</li>');
+								return true; // Ends the loop
+							}
+
+							return false;
+						});
+					}
+				});
+			});
+		});
+	});
+
+</script>
+</body>
+</html>
